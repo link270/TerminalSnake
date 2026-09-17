@@ -4,6 +4,7 @@ import os
 import random
 import sys
 import time
+from typing import NamedTuple
 
 
 DIRECTIONS = ((1, 0), (0, 1), (-1, 0), (0, -1))
@@ -13,6 +14,13 @@ class Action(Enum):
     STRAIGHT = 0
     RIGHT = 1
 
+
+class StepResult(NamedTuple):
+    observation: tuple
+    reward: int
+    done: bool
+
+
 class SnakeGame:
     """Small Snake environment. Actions are -1 (left), 0 (straight), 1 (right)."""
 
@@ -21,7 +29,13 @@ class SnakeGame:
             raise ValueError("size must be at least 3")
         self.size = size
         self.render_enabled = render
-        self.random = random.Random(seed)
+
+        if seed is None:
+            self.seed = random.randrange(sys.maxsize)
+        else:
+            self.seed = seed
+
+        self.random = random.Random(self.seed)
         self.reset()
 
     def reset(self):
@@ -54,7 +68,7 @@ class SnakeGame:
 
         if not (0 <= new_head[0] < self.size and 0 <= new_head[1] < self.size) or new_head in body:
             self.done = True
-            return self.observation, -1, True
+            return StepResult(self.observation, -1, True)
 
         self.snake.insert(0, new_head)
         if ate:
@@ -62,7 +76,7 @@ class SnakeGame:
             self._place_food()
         else:
             self.snake.pop()
-        return self.observation, 1 if ate else 0, self.done
+        return StepResult(self.observation, 1 if ate else 0, self.done)
 
     def _place_food(self):
         empty = [(x, y) for y in range(self.size) for x in range(self.size) if (x, y) not in self.snake]

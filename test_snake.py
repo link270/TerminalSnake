@@ -2,7 +2,7 @@ import unittest
 from contextlib import redirect_stdout
 from io import StringIO
 
-from snake import Action, SnakeGame
+from snake import Action, SnakeGame, StepResult
 
 
 class SnakeGameTest(unittest.TestCase):
@@ -10,7 +10,9 @@ class SnakeGameTest(unittest.TestCase):
         game = SnakeGame(render=False)
         self.assertEqual(game.steps, 0)
         game.food = (5, 4)
-        observation, reward, done = game.step(Action.LEFT)
+        result = game.step(Action.LEFT)
+        self.assertIsInstance(result, StepResult)
+        observation, reward, done = result
         self.assertEqual((observation, reward, done), ((((5, 4), (5, 5), (4, 5)), game.food), 1, False))
         self.assertEqual(game.steps, 1)
 
