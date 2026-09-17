@@ -29,6 +29,7 @@ class SnakeGame:
         self.snake = [(middle, middle), (middle - 1, middle)]
         self.direction = 0
         self.score = 0
+        self.steps = 0
         self.done = False
         self._place_food()
         return self.observation
@@ -43,6 +44,7 @@ class SnakeGame:
         if action not in Action:
             raise ValueError("action must be -1 (left), 0 (straight), or 1 (right)")
 
+        self.steps += 1
         self.direction = (self.direction + action.value) % 4
         dx, dy = DIRECTIONS[self.direction]
         head = self.snake[0]
@@ -68,14 +70,17 @@ class SnakeGame:
         if not empty:
             self.done = True
 
-    def render(self):
+    def render(self, delay=0, message=None):
         if not self.render_enabled:
-            return
+            return False
+
+        time.sleep(delay)
         cells = set(self.snake[1:])
         rows = []
         for y in range(self.size):
             rows.append("".join("@" if (x, y) == self.snake[0] else "*" if (x, y) == self.food else "o" if (x, y) in cells else " " for x in range(self.size)))
-        print("\x1b[H\x1b[J" + f"Score: {self.score}\n+{'-' * self.size}+\n" + "\n".join(f"|{row}|" for row in rows) + f"\n+{'-' * self.size}+", flush=True)
+        print("\x1b[H\x1b[J" + f"Score: {self.score}\n+{'-' * self.size}+\n" + "\n".join(f"|{row}|" for row in rows) + f"\n+{'-' * self.size}+" + (f"\n{message}" if message is not None else ""), flush=True)
+        return True
 
 
 def _read_key():
@@ -105,8 +110,7 @@ def play(size=10, delay=0.15):
             if turn in (1, 3):
                 action = Action.RIGHT if turn == 1 else Action.LEFT
         game.step(action)
-        time.sleep(delay)
-    game.render()
+    game.render(delay)
     print("Game over!")
 
 
