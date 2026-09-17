@@ -52,23 +52,43 @@ class SnakeGame:
     def observation(self):
         return tuple(self.snake), self.food
 
-    def step(self, action=Action.STRAIGHT):
+    def calculate_next_head(self, direction):
+        dx, dy = DIRECTIONS[direction]
+        head = self.snake[0]
+        return (head[0] + dx, head[1] + dy)
+
+    def calculate_next_direction(self, action: Action):
+        return (self.direction + action.value) % 4
+
+    def is_wall(self, position):
+        px = position[0]
+        py = position[1]
+        return not (0 <= px < self.size and 0 <= py < self.size)
+
+    def is_snake(self, position):
+        return position in self.snake[:-1]
+
+    def is_collision(self, position):
+        return self.is_wall(position) or self.is_snake(position)
+
+    def would_collide(self, action: Action):
+        direction = self.calculate_next_direction(action)
+        return self.is_collision(self.calculate_next_head(direction))
+
+    def step(self, action: Action = Action.STRAIGHT):
         if self.done:
             raise RuntimeError("reset the game before stepping again")
         if action not in Action:
             raise ValueError("action must be -1 (left), 0 (straight), or 1 (right)")
 
         self.steps += 1
-        self.direction = (self.direction + action.value) % 4
-        dx, dy = DIRECTIONS[self.direction]
-        head = self.snake[0]
-        new_head = (head[0] + dx, head[1] + dy)
-        ate = new_head == self.food
-        body = self.snake if ate else self.snake[:-1]
-
-        if not (0 <= new_head[0] < self.size and 0 <= new_head[1] < self.size) or new_head in body:
+        self.direction = self.calculate_next_direction(action)
+        new_head = self.calculate_next_head(self.direction)
+        if self.is_collision(new_head):
             self.done = True
-            return StepResult(self.observation, -1, True)
+            return StepResult(self.observation, -1, self.done)
+
+        ate = new_head == self.food
 
         self.snake.insert(0, new_head)
         if ate:
@@ -113,7 +133,7 @@ def play(size=10, delay=0.15):
     keys = {"K": 2, "M": 0, "H": 3, "P": 1}
 
     while not game.done:
-        game.render()
+        game.render(delay)
         key = _read_key()
         if key in ("q", "Q"):
             return
@@ -124,7 +144,7 @@ def play(size=10, delay=0.15):
             if turn in (1, 3):
                 action = Action.RIGHT if turn == 1 else Action.LEFT
         game.step(action)
-    game.render(delay)
+    game.render()
     print("Game over!")
 
 
