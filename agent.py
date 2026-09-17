@@ -46,7 +46,7 @@ def run_episode(ep, runs, game, agent, verbose):
     while not game.done:
         action = agent.choose_action(observation)
         observation, reward, done = game.step(action)
-        if verbose:
+        if verbose >= 2:
             log = f"Episode: {ep}/{runs}, Step: {game.steps}, Snake pos:{observation[0]}, Food pos: {observation[1]} Reward: {reward}, Done: {done}"
             if not game.render(render_delay, log):
                 print(log)
@@ -54,7 +54,7 @@ def run_episode(ep, runs, game, agent, verbose):
             game.render(render_delay)
 
 
-def begin(size=10, runs=1000, render=False, verbose=False, agent: Agent = None, game_seed=None):
+def begin(size=10, runs=1000, render=False, verbose=0, agent: Agent = None, game_seed=None):
     if agent is None:
         print("Agent cannot be none.")
         return
@@ -66,10 +66,10 @@ def begin(size=10, runs=1000, render=False, verbose=False, agent: Agent = None, 
         run_episode(ep, runs, game, agent, verbose)
         result = {"episode": ep, "score": game.score, "steps": game.steps}
         results.append(result)
-        if not render:
+        if not render and verbose >= 1:
             print(result)
 
-    if render:
+    if render and verbose >= 1:
         print(*results, sep="\n")
     summary = compile_results(results)
     print(
@@ -89,7 +89,7 @@ if __name__ == "__main__":
     parser.add_argument("--agent_seed", type=int, default=None)
     parser.add_argument("--game_seed", type=int, default=None)
     parser.add_argument("--render", action="store_true")
-    parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--verbose", type=int, choices=(0, 1, 2), default=0)
     parser.add_argument("--agent", choices=("random",), default=None)
     args = parser.parse_args()
 
