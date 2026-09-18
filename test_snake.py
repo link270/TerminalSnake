@@ -1,9 +1,10 @@
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
+import os
 from unittest.mock import patch
 
-from snake import Action, SnakeGame, StepResult, play
+from snake import Action, SnakeGame, StepResult, _read_key, play
 
 
 class SnakeGameTest(unittest.TestCase):
@@ -46,11 +47,23 @@ class SnakeGameTest(unittest.TestCase):
             SnakeGame(render=True).render(message="Agent chose LEFT")
         self.assertTrue(output.getvalue().endswith("Agent chose LEFT\n"))
 
-    @patch("snake._read_key", return_value="q")
+    @unittest.skipIf(os.name == "nt", "POSIX input test")
+    @patch("snake.select.select", return_value=([object()], [], []))
+    @patch("snake.sys.stdin", StringIO("\x1b[A"))
+    def test_reads_posix_arrow_key(self, _select):
+        self.assertEqual(_read_key(), "H")
+
+    @patch("snake._read_key", side_effect=[None, "H", None, "q"])
+    @patch("snake.time.sleep")
+    @patch.object(SnakeGame, "step")
     @patch.object(SnakeGame, "render")
-    def test_play_uses_frame_delay(self, render, _read_key):
+    def test_play_waits_for_an_arrow_key(self, render, step, sleep, _read_key):
         play(delay=0.15)
-        render.assert_called_once_with(0.15)
+        self.assertEqual(render.call_args_list[0].kwargs, {"message": "Press an arrow key to start; Q quits."})
+        render.assert_any_call()
+        sleep.assert_any_call(0.01)
+        sleep.assert_any_call(0.15)
+        step.assert_called_once()
 
 
 if __name__ == "__main__":

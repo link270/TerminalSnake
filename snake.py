@@ -1,7 +1,9 @@
 import argparse
+from contextlib import contextmanager
 from enum import Enum
 import os
 import random
+import select
 import sys
 import time
 from typing import NamedTuple
@@ -135,24 +137,62 @@ def _read_key():
         key = msvcrt.getwch()
         return msvcrt.getwch() if key in ("\x00", "\xe0") else key
 
+    if not select.select([sys.stdin], [], [], 0)[0]:
+        return None
+    key = sys.stdin.read(1)
+    if key == "\x1b":
+        key += sys.stdin.read(2)
+    return {"\x1b[A": "H", "\x1b[B": "P", "\x1b[C": "M", "\x1b[D": "K"}.get(key, key)
+
+
+@contextmanager
+def _keyboard_mode():
+    if os.name == "nt" or not sys.stdin.isatty():
+        yield
+        return
+
+    import termios
+    import tty
+
+    fd = sys.stdin.fileno()
+    settings = termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        yield
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, settings)
+
 
 def play(size=10, delay=0.15):
     game = SnakeGame(size=size)
 
     keys = {"K": 2, "M": 0, "H": 3, "P": 1}
 
-    while not game.done:
-        game.render(delay)
-        key = _read_key()
-        if key in ("q", "Q"):
-            return
-        action = Action.STRAIGHT
-        if key in keys:
-            wanted = keys[key]
-            turn = (wanted - game.direction) % 4
-            if turn in (1, 3):
-                action = Action.RIGHT if turn == 1 else Action.LEFT
-        game.step(action)
+    with _keyboard_mode():
+        game.render(message="Press an arrow key to start; Q quits.")
+        key = None
+        while key not in keys:
+            key = _read_key()
+            if key in ("q", "Q"):
+                return
+            if key not in keys:
+                time.sleep(0.01)
+
+        while not game.done:
+            game.render()
+            time.sleep(delay)
+            pressed = _read_key()
+            if pressed is not None:
+                key = pressed
+            if key in ("q", "Q"):
+                return
+            action = Action.STRAIGHT
+            if key in keys:
+                wanted = keys[key]
+                turn = (wanted - game.direction) % 4
+                if turn in (1, 3):
+                    action = Action.RIGHT if turn == 1 else Action.LEFT
+            game.step(action)
     game.render()
     print("Game over!")
 
