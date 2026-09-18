@@ -24,6 +24,9 @@ class Agent(ABC):
     def learn(self, state, action, reward, next_state, done,):
         pass
 
+    def decay(self):
+        pass
+
 
 class RandomAgent(Agent):
     def choose_action(self, state) -> Action:
@@ -34,10 +37,13 @@ class RandomAgent(Agent):
 
 
 class QLearningAgent(Agent):
-    def __init__(self, seed=None, epsilon=0.1, alpha = 0.1, gamma = 0.9):
+    def __init__(self, seed=None, epsilon=1.0, epsilon_decay = 0.995, minimum_epsilon = 0.05, alpha = 0.1, gamma = 0.9):
         super().__init__(seed)
-        self.epsilon = epsilon
         self.q_table = {}
+
+        self.epsilon = epsilon
+        self.epsilon_decay = epsilon_decay
+        self.minimum_epsilon = minimum_epsilon
         self.alpha = alpha
         self.gamma = gamma
 
@@ -46,11 +52,9 @@ class QLearningAgent(Agent):
             return self.rng.choice(list(Action))
 
         q_values = self.get_q_values(state)
-        best_index = max(
-            range(len(q_values)),
-            key=q_values.__getitem__
-        )
-
+        best_value = max(q_values)
+        best_indices = [index for index, value in enumerate(q_values) if value == best_value]
+        best_index = self.rng.choice(best_indices)
         return list(Action)[best_index]
 
     def get_q_values(self, state):
@@ -64,12 +68,13 @@ class QLearningAgent(Agent):
         action_index = list(Action).index(action)
         q_values = self.get_q_values(state)
         old_value = q_values[action_index]
-        next_q_values = self.get_q_values(next_state)
-
-        best_future_q = 0 if done else max(next_q_values)
+        best_future_q = 0 if done else max(self.get_q_values(next_state))
 
         new_q = old_value + self.alpha * (reward + self.gamma * best_future_q - old_value)
         q_values[action_index] = new_q
+
+    def decay(self):
+        self.epsilon = max(self.minimum_epsilon, self.epsilon * self.epsilon_decay)
 
 
 
@@ -96,9 +101,9 @@ def run_episode(ep, runs, game, agent, verbose):
         action = agent.choose_action(state)
         observation, reward, done = game.step(action)
 
-        next_state = game.get_state()
+        next_state = None if done else game.get_state()
 
-        agent.learn( state, action, reward, next_state, done,)
+        agent.learn(state, action, reward, next_state, done)
         
         if verbose >= 2:
             log = f"Episode: {ep}/{runs}, Step: {game.steps}, Snake pos:{observation[0]}, Food pos: {observation[1]} Reward: {reward}, Done: {done}"
@@ -109,7 +114,9 @@ def run_episode(ep, runs, game, agent, verbose):
 
         if game.steps >= MAX_STEPS:
             print(f"Run went over the max steps of {MAX_STEPS}")
-            return
+            break
+
+        agent.decay()
 
 
 def begin(size=10, runs=1000, render=False, verbose=0, agent = None, game_seed=None):
