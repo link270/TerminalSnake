@@ -20,17 +20,26 @@ class Agent(ABC):
     def choose_action(self, state) -> Action:
         pass
 
+    @abstractmethod
+    def learn(self, state, action, reward, next_state, done,):
+        pass
+
 
 class RandomAgent(Agent):
     def choose_action(self, state) -> Action:
         return self.rng.choice(list(Action))
+    
+    def learn(self, state, action, reward, next_state, done,):
+        pass
 
 
 class QLearningAgent(Agent):
-    def __init__(self, seed=None, epsilon=0.1):
+    def __init__(self, seed=None, epsilon=0.1, alpha = 0.1, gamma = 0.9):
         super().__init__(seed)
         self.epsilon = epsilon
         self.q_table = {}
+        self.alpha = alpha
+        self.gamma = gamma
 
     def choose_action(self, state) -> Action:
         if self.rng.random() < self.epsilon:
@@ -49,6 +58,19 @@ class QLearningAgent(Agent):
             self.q_table[state] = [0.0, 0.0, 0.0]
 
         return self.q_table[state]
+
+    # new Q = old Q + α × (reward + γ × best future Q - old Q)
+    def learn(self, state, action, reward, next_state, done):
+        action_index = list(Action).index(action)
+        q_values = self.get_q_values(state)
+        old_value = q_values[action_index]
+        next_q_values = self.get_q_values(next_state)
+
+        best_future_q = 0 if done else max(next_q_values)
+
+        new_q = old_value + self.alpha * (reward + self.gamma * best_future_q - old_value)
+        q_values[action_index] = new_q
+
 
 
 def compile_results(results):
@@ -73,6 +95,11 @@ def run_episode(ep, runs, game, agent, verbose):
         state = game.get_state()
         action = agent.choose_action(state)
         observation, reward, done = game.step(action)
+
+        next_state = game.get_state()
+
+        agent.learn( state, action, reward, next_state, done,)
+        
         if verbose >= 2:
             log = f"Episode: {ep}/{runs}, Step: {game.steps}, Snake pos:{observation[0]}, Food pos: {observation[1]} Reward: {reward}, Done: {done}"
             if not game.render(render_delay, log):
@@ -85,7 +112,7 @@ def run_episode(ep, runs, game, agent, verbose):
             return
 
 
-def begin(size=10, runs=1000, render=False, verbose=0, agent: Agent = None, game_seed=None):
+def begin(size=10, runs=1000, render=False, verbose=0, agent = None, game_seed=None):
     if agent is None:
         print("Agent cannot be none.")
         return

@@ -54,13 +54,30 @@ class SnakeGame:
     def observation(self):
         return tuple(self.snake), self.food
 
+    
     def get_state(self):
+        head_x = self.snake[0][0]
+        head_y = self.snake[0][1]
+
+        food_up = self.food is not None and self.food[1] < head_y
+        food_down = self.food is not None and self.food[1] > head_y
+        food_left = self.food is not None and self.food[0] < head_x
+        food_right = self.food is not None and self.food[0] > head_x
+
         return(
+            # danger_straight, danger_right, danger_left,
             self.would_collide(Action.STRAIGHT),
             self.would_collide(Action.RIGHT),
             self.would_collide(Action.LEFT),
 
-            DIRECTIONS[self.direction]
+            # direction
+            self.direction,
+
+            # food_up, food_down, food_left, food_right
+            food_up,
+            food_down,
+            food_left,
+            food_right,
         )
 
     def calculate_next_head(self, direction):
