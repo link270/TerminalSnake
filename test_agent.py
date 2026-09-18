@@ -3,10 +3,18 @@ from contextlib import redirect_stdout
 from io import StringIO
 from unittest.mock import patch
 
-from agent import RandomAgent, begin, compile_results
+from agent import QLearningAgent, RandomAgent, begin, compile_results
+from snake import Action
 
 
 class CompileResultsTest(unittest.TestCase):
+    def test_q_learning_agent_can_choose_an_action(self):
+        agent = QLearningAgent(seed=1, epsilon=0)
+        state = (False, False, False, (1, 0))
+
+        self.assertIsInstance(agent.choose_action(state), Action)
+        self.assertIn(state, agent.q_table)
+
     def test_compiles_episode_results(self):
         results = [
             {"episode": 0, "score": 1, "steps": 10},

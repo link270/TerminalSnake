@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 
 from snake import SnakeGame, Action
 
+MAX_STEPS = 1000
 
 class Agent(ABC):
     def __init__(self, seed=None):
@@ -16,13 +17,38 @@ class Agent(ABC):
         self.rng = random.Random(self.seed)
 
     @abstractmethod
-    def choose_action(self, observation) -> Action:
+    def choose_action(self, state) -> Action:
         pass
 
 
 class RandomAgent(Agent):
-    def choose_action(self, observation) -> Action:
+    def choose_action(self, state) -> Action:
         return self.rng.choice(list(Action))
+
+
+class QLearningAgent(Agent):
+    def __init__(self, seed=None, epsilon=0.1):
+        super().__init__(seed)
+        self.epsilon = epsilon
+        self.q_table = {}
+
+    def choose_action(self, state) -> Action:
+        if self.rng.random() < self.epsilon:
+            return self.rng.choice(list(Action))
+
+        q_values = self.get_q_values(state)
+        best_index = max(
+            range(len(q_values)),
+            key=q_values.__getitem__
+        )
+
+        return list(Action)[best_index]
+
+    def get_q_values(self, state):
+        if state not in self.q_table:
+            self.q_table[state] = [0.0, 0.0, 0.0]
+
+        return self.q_table[state]
 
 
 def compile_results(results):
@@ -44,7 +70,8 @@ def run_episode(ep, runs, game, agent, verbose):
     observation = game.reset()
     render_delay = 0.02
     while not game.done:
-        action = agent.choose_action(observation)
+        state = game.get_state()
+        action = agent.choose_action(state)
         observation, reward, done = game.step(action)
         if verbose >= 2:
             log = f"Episode: {ep}/{runs}, Step: {game.steps}, Snake pos:{observation[0]}, Food pos: {observation[1]} Reward: {reward}, Done: {done}"
@@ -52,6 +79,10 @@ def run_episode(ep, runs, game, agent, verbose):
                 print(log)
         else:
             game.render(render_delay)
+
+        if game.steps >= MAX_STEPS:
+            print(f"Run went over the max steps of {MAX_STEPS}")
+            return
 
 
 def begin(size=10, runs=1000, render=False, verbose=0, agent: Agent = None, game_seed=None):
@@ -90,8 +121,8 @@ if __name__ == "__main__":
     parser.add_argument("--game_seed", type=int, default=None)
     parser.add_argument("--render", action="store_true")
     parser.add_argument("--verbose", type=int, choices=(0, 1, 2), default=0)
-    parser.add_argument("--agent", choices=("random",), default=None)
+    parser.add_argument("--agent", choices=("random", "q_learning"), default=None)
     args = parser.parse_args()
 
-    agent = RandomAgent(seed=args.agent_seed) if args.agent else RandomAgent(seed=args.agent_seed)
+    agent = QLearningAgent(seed=args.agent_seed) if args.agent == "q_learning" else RandomAgent(seed=args.agent_seed)
     begin(args.size, args.runs, args.render, args.verbose, agent, args.game_seed)
