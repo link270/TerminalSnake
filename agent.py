@@ -1,6 +1,7 @@
 import argparse
 import random
 import sys
+import time
 from abc import ABC, abstractmethod
 
 from snake import SnakeGame, Action
@@ -93,7 +94,7 @@ def compile_results(results):
     }
 
 
-def run_episode(ep, runs, game, agent, verbose):
+def run_episode(ep, runs, game, agent, verbose, train):
     observation = game.reset()
     render_delay = 0.02
     while not game.done:
@@ -103,7 +104,7 @@ def run_episode(ep, runs, game, agent, verbose):
 
         next_state = None if done else game.get_state()
 
-        agent.learn(state, action, reward, next_state, done)
+        if train: agent.learn(state, action, reward, next_state, done)
         
         if verbose >= 2:
             log = f"Episode: {ep}/{runs}, Step: {game.steps}, Snake pos:{observation[0]}, Food pos: {observation[1]} Reward: {reward}, Done: {done}"
@@ -116,10 +117,10 @@ def run_episode(ep, runs, game, agent, verbose):
             print(f"Run went over the max steps of {MAX_STEPS}")
             break
 
-    agent.decay()
+    if train: agent.decay()
 
 
-def begin(size=10, runs=1000, render=False, verbose=0, agent = None, game_seed=None):
+def run_episodes(size=10, runs=1000, render=False, verbose=0, agent = None, game_seed=None, train=False):
     if agent is None:
         print("Agent cannot be none.")
         return
@@ -128,7 +129,7 @@ def begin(size=10, runs=1000, render=False, verbose=0, agent = None, game_seed=N
 
     results = []
     for ep in range(runs):
-        run_episode(ep, runs, game, agent, verbose)
+        run_episode(ep, runs, game, agent, verbose, train)
         result = {"episode": ep, "score": game.score, "steps": game.steps}
         results.append(result)
         if not render and verbose >= 1:
@@ -150,13 +151,34 @@ def begin(size=10, runs=1000, render=False, verbose=0, agent = None, game_seed=N
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Start a game of snake with an agent.")
     parser.add_argument("--size", type=int, default=10)
-    parser.add_argument("--runs", type=int, default=1000)
     parser.add_argument("--agent_seed", type=int, default=None)
     parser.add_argument("--game_seed", type=int, default=None)
-    parser.add_argument("--render", action="store_true")
+    parser.add_argument("--render_eval", action="store_true")
+    parser.add_argument("--render_train", action="store_true")
     parser.add_argument("--verbose", type=int, choices=(0, 1, 2), default=0)
-    parser.add_argument("--agent", choices=("random", "q_learning"), default=None)
+    parser.add_argument("--agent", choices=("random", "q_learning"), default="q_learning")
+    parser.add_argument("-tr", "--training_runs", type=int, default=10_000)
+    parser.add_argument("-er", "--evaluation_runs", type=int, default=1_000)
     args = parser.parse_args()
 
     agent = QLearningAgent(seed=args.agent_seed) if args.agent == "q_learning" else RandomAgent(seed=args.agent_seed)
-    begin(args.size, args.runs, args.render, args.verbose, agent, args.game_seed)
+    training_runs = args.training_runs
+    eval_runs = args.evaluation_runs
+
+    print(
+        f"Starting with agent: {args.agent}, grid size: {args.size}, verbose level: {args.verbose}\n"
+        f"rendering: Training: {args.render_train} | Eval: {args.render_eval}\n"
+        f"{f"Training with {training_runs} runs.\n" if training_runs > 0 else ""}"
+        f"{f"Evaluating with {eval_runs} runs.\n" if eval_runs > 0 and args.agent !="random" else ""}"
+        f"\nGame seed: {"Random" if args.game_seed is None else args.gameseed}\n"
+        f"Agent seed: {"Random" if args.agent_seed is None else args.agent_seed}"
+        )
+
+    if args.agent != "random":
+        print(f"\n\nStarting {training_runs} training runs.\n")
+        time.sleep(1.0)
+        training_results = run_episodes(args.size, training_runs, args.render_train, args.verbose, agent, args.game_seed, train=True)
+        
+    print(f"\n\nStarting {eval_runs} evaluation runs.\n")
+    time.sleep(1.0)
+    eval_results = run_episodes(args.size, eval_runs, args.render_eval, args.verbose, agent, args.game_seed)

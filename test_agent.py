@@ -3,7 +3,7 @@ from contextlib import redirect_stdout
 from io import StringIO
 from unittest.mock import patch
 
-from agent import QLearningAgent, RandomAgent, begin, compile_results, run_episode
+from agent import QLearningAgent, RandomAgent, run_episodes, compile_results, run_episode
 from snake import Action, SnakeGame
 
 
@@ -62,10 +62,10 @@ class ResultsTest(unittest.TestCase):
         with patch("agent.run_episode", side_effect=finish_episode):
             quiet = StringIO()
             with redirect_stdout(quiet):
-                begin(size=3, runs=1, verbose=0, agent=RandomAgent(1), game_seed=1)
+                run_episodes(size=3, runs=1, verbose=0, agent=RandomAgent(1), game_seed=1)
             logged = StringIO()
             with redirect_stdout(logged):
-                begin(size=3, runs=1, verbose=1, agent=RandomAgent(1), game_seed=1)
+                run_episodes(size=3, runs=1, verbose=1, agent=RandomAgent(1), game_seed=1)
 
         self.assertNotIn("{'episode':", quiet.getvalue())
         self.assertIn("{'episode': 0, 'score': 2, 'steps': 5}", logged.getvalue())
