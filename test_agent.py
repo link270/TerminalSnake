@@ -3,29 +3,41 @@ from contextlib import redirect_stdout
 from io import StringIO
 from unittest.mock import patch
 
-from agent import QLearningAgent, RandomAgent, begin, compile_results
-from snake import Action
+from agent import QLearningAgent, RandomAgent, begin, compile_results, run_episode
+from snake import Action, SnakeGame
 
 
-class CompileResultsTest(unittest.TestCase):
-    def test_q_learning_agent_can_choose_an_action(self):
+STATE = (False, False, False, 0, True, False, False, True)
+NEXT_STATE = (False, True, False, 0, True, False, False, True)
+
+
+class QLearningAgentTest(unittest.TestCase):
+    def test_choose_action_creates_q_values_for_new_state(self):
         agent = QLearningAgent(seed=1, epsilon=0)
-        state = (False, False, False, 0, True, False, False, True)
 
-        self.assertIsInstance(agent.choose_action(state), Action)
-        self.assertIn(state, agent.q_table)
+        self.assertIsInstance(agent.choose_action(STATE), Action)
+        self.assertIn(STATE, agent.q_table)
 
-    def test_q_learning_agent_can_learn(self):
+    def test_learn_updates_chosen_action_value(self):
         agent = QLearningAgent(alpha=0.5, gamma=0.9)
-        state = (False, False, False, 0, True, False, False, True)
-        next_state = (False, True, False, 0, True, False, False, True)
-        agent.q_table[state] = [0.0, 2.0, 0.0]
-        agent.q_table[next_state] = [1.0, 4.0, 3.0]
+        agent.q_table[STATE] = [0.0, 2.0, 0.0]
+        agent.q_table[NEXT_STATE] = [1.0, 4.0, 3.0]
 
-        agent.learn(state, Action.STRAIGHT, reward=1, next_state=next_state, done=False)
+        agent.learn(STATE, Action.STRAIGHT, reward=1, next_state=NEXT_STATE, done=False)
 
-        self.assertAlmostEqual(agent.q_table[state][1], 3.3)
+        self.assertAlmostEqual(agent.q_table[STATE][1], 3.3)
 
+    def test_epsilon_decays_once_per_episode(self):
+        agent = QLearningAgent(epsilon=1.0, epsilon_decay=0.995)
+        game = SnakeGame(render=False, seed=1)
+
+        run_episode(0, 1, game, agent, verbose=0)
+
+        self.assertGreater(game.steps, 1)
+        self.assertEqual(agent.epsilon, 0.995)
+
+
+class ResultsTest(unittest.TestCase):
     def test_compiles_episode_results(self):
         results = [
             {"episode": 0, "score": 1, "steps": 10},
@@ -42,7 +54,7 @@ class CompileResultsTest(unittest.TestCase):
             "best_survival_episode": 0,
         })
 
-    def test_episode_results_require_log_level_one(self):
+    def test_episode_results_require_verbose_level_one(self):
         def finish_episode(_ep, _runs, game, _agent, _verbose):
             game.score = 2
             game.steps = 5

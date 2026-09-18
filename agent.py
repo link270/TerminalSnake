@@ -116,7 +116,7 @@ def run_episode(ep, runs, game, agent, verbose):
             print(f"Run went over the max steps of {MAX_STEPS}")
             break
 
-        agent.decay()
+    agent.decay()
 
 
 def begin(size=10, runs=1000, render=False, verbose=0, agent = None, game_seed=None):

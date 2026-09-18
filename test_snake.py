@@ -47,6 +47,8 @@ class SnakeGameTest(unittest.TestCase):
             SnakeGame(render=True).render(message="Agent chose LEFT")
         self.assertTrue(output.getvalue().endswith("Agent chose LEFT\n"))
 
+
+class TerminalPlayTest(unittest.TestCase):
     @unittest.skipIf(os.name == "nt", "POSIX input test")
     @patch("snake.select.select", return_value=([object()], [], []))
     @patch("snake.sys.stdin", StringIO("\x1b[A"))
