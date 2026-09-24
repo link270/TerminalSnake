@@ -1,82 +1,12 @@
 import argparse
 import random
+from statistics import median
 import sys
-import time
-from abc import ABC, abstractmethod
+import csv
 
+from pathlib import Path
+from agent_defs import RandomAgent, QLearningAgent, DNQAgent
 from snake import SnakeGame, Action
-
-MAX_STEPS = 1000
-
-class Agent(ABC):
-    def __init__(self, seed=None):
-        if seed is None:
-            self.seed = random.randrange(sys.maxsize)
-        else:
-            self.seed = seed
-
-        self.rng = random.Random(self.seed)
-
-    @abstractmethod
-    def choose_action(self, state) -> Action:
-        pass
-
-    @abstractmethod
-    def learn(self, state, action, reward, next_state, done,):
-        pass
-
-    def decay(self):
-        pass
-
-
-class RandomAgent(Agent):
-    def choose_action(self, state) -> Action:
-        return self.rng.choice(list(Action))
-    
-    def learn(self, state, action, reward, next_state, done,):
-        pass
-
-
-class QLearningAgent(Agent):
-    def __init__(self, seed=None, epsilon=1.0, epsilon_decay = 0.995, minimum_epsilon = 0.05, alpha = 0.1, gamma = 0.9):
-        super().__init__(seed)
-        self.q_table = {}
-
-        self.epsilon = epsilon
-        self.epsilon_decay = epsilon_decay
-        self.minimum_epsilon = minimum_epsilon
-        self.alpha = alpha
-        self.gamma = gamma
-
-    def choose_action(self, state) -> Action:
-        if self.rng.random() < self.epsilon:
-            return self.rng.choice(list(Action))
-
-        q_values = self.get_q_values(state)
-        best_value = max(q_values)
-        best_indices = [index for index, value in enumerate(q_values) if value == best_value]
-        best_index = self.rng.choice(best_indices)
-        return list(Action)[best_index]
-
-    def get_q_values(self, state):
-        if state not in self.q_table:
-            self.q_table[state] = [0.0, 0.0, 0.0]
-
-        return self.q_table[state]
-
-    # new Q = old Q + α × (reward + γ × best future Q - old Q)
-    def learn(self, state, action, reward, next_state, done):
-        action_index = list(Action).index(action)
-        q_values = self.get_q_values(state)
-        old_value = q_values[action_index]
-        best_future_q = 0 if done else max(self.get_q_values(next_state))
-
-        new_q = old_value + self.alpha * (reward + self.gamma * best_future_q - old_value)
-        q_values[action_index] = new_q
-
-    def decay(self):
-        self.epsilon = max(self.minimum_epsilon, self.epsilon * self.epsilon_decay)
-
 
 
 def compile_results(results):
@@ -86,22 +16,26 @@ def compile_results(results):
     best_survival = max(results, key=lambda result: result["steps"])
     return {
         "average_score": sum(result["score"] for result in results) / len(results),
+        "median_score": median(result["score"] for result in results),
         "best_score": best_score["score"],
         "best_score_episode": best_score["episode"],
         "average_survival": sum(result["steps"] for result in results) / len(results),
         "best_survival": best_survival["steps"],
         "best_survival_episode": best_survival["episode"],
+        "max_possible_score": results[0]["max_possible_score"],
     }
 
 
 def run_episode(ep, runs, game, agent, verbose, train):
     observation = game.reset()
     render_delay = 0.02
+    steps_without_food = 0
+    no_food_cap = 2 * game.size * game.size
+    truncated = False
     while not game.done:
         state = game.get_state()
         action = agent.choose_action(state)
         observation, reward, done = game.step(action)
-
         next_state = None if done else game.get_state()
 
         if train: agent.learn(state, action, reward, next_state, done)
@@ -113,34 +47,82 @@ def run_episode(ep, runs, game, agent, verbose, train):
         else:
             game.render(render_delay)
 
-        if game.steps >= MAX_STEPS:
-            print(f"Run went over the max steps of {MAX_STEPS}")
+        steps_without_food = 0 if reward == 1 else steps_without_food + 1
+        if steps_without_food >= no_food_cap:
+            print(f"\nRun: {ep} went {steps_without_food} without food. Ending early.")
+            truncated = True
             break
 
     if train: agent.decay()
+    return truncated
 
 
-def run_episodes(size=10, runs=1000, render=False, verbose=0, agent = None, game_seed=None, train=False):
+def run_episodes(size=10, runs=1000, render=False, verbose=0, agent = None, game_seed=None, train=False, progress_bar=False):
     if agent is None:
         print("Agent cannot be none.")
         return
 
+    if runs <=0:
+        print("Skipping due to insufficient runs.")
+        return
+
     game = SnakeGame(size=size, render=render, seed=game_seed)
 
+    if progress_bar: progress_interval = max(1, runs // 100) 
     results = []
     for ep in range(runs):
-        run_episode(ep, runs, game, agent, verbose, train)
-        result = {"episode": ep, "score": game.score, "steps": game.steps}
+        truncated = run_episode(ep, runs, game, agent, verbose, train)
+
+        if progress_bar:
+            if ep % progress_interval == 0 or ep == runs - 1:
+                percent = int((ep + 1) / runs * 100)
+                bar_length = 40
+                filled_length = int(bar_length * percent // 100)
+                bar = '█' * filled_length + '-' * (bar_length - filled_length)
+                
+                # \r moves the cursor back to the start of the line
+                sys.stdout.write(f'\rProgress: |{bar}| {percent}% | Run: {ep+1}/{runs}')
+                sys.stdout.flush()
+
+        
+        result = {
+            "episode": ep,
+            "grid_size": size,
+            "max_possible_score": size ** 2 - 2,
+            "score": game.score,
+            "steps": game.steps,
+            "truncated": truncated,
+            }
+        
+        if not isinstance(agent, RandomAgent):
+            result["epsilon"] = agent.epsilon
+            result["num_q_table_states"] = len(agent.q_table)
+        
         results.append(result)
         if not render and verbose >= 1:
             print(result)
 
+    if train:
+        for i in range(len(results)):
+            length = min(100, i+1)
+            rolling_count = 0
+            for r in range(max(0, i-99), i+1):
+                rolling_count += results[r]["score"]
+
+            results[i]["rolling_average"] = rolling_count / length
+
+    if progress_bar:
+        sys.stdout.write('\n\n')
+        sys.stdout.flush()
+    
     if render and verbose >= 1:
         print(*results, sep="\n")
     summary = compile_results(results)
     print(
         f"Average score: {summary['average_score']:.2f}\n"
+        f"Median score: {summary['median_score']}\n"
         f"Best score: {summary['best_score']} (episode {summary['best_score_episode']})\n"
+        f"Best possible score: {summary['max_possible_score']}\n"
         f"Average survival: {summary['average_survival']:.2f} steps\n"
         f"Best survival: {summary['best_survival']} steps (episode {summary['best_survival_episode']})\n"
         f"Agent seed: {agent.seed} Game seed: {game.seed}"
@@ -156,12 +138,19 @@ if __name__ == "__main__":
     parser.add_argument("--render_eval", action="store_true")
     parser.add_argument("--render_train", action="store_true")
     parser.add_argument("--verbose", type=int, choices=(0, 1, 2), default=0)
-    parser.add_argument("--agent", choices=("random", "q_learning"), default="q_learning")
+    parser.add_argument("--agent", choices=("random", "q_learning", "dnq"), default="q_learning")
     parser.add_argument("-tr", "--training_runs", type=int, default=10_000)
     parser.add_argument("-er", "--evaluation_runs", type=int, default=1_000)
     args = parser.parse_args()
 
-    agent = QLearningAgent(seed=args.agent_seed) if args.agent == "q_learning" else RandomAgent(seed=args.agent_seed)
+    match args.agent:
+        case "random":
+            agent = RandomAgent(seed=args.agent_seed)
+        case "q_learning":
+            agent = QLearningAgent(seed=args.agent_seed)
+        case "dnq":
+            agent = DNQAgent(seed=args.agent_seed)
+    
     training_runs = args.training_runs
     eval_runs = args.evaluation_runs
 
@@ -170,15 +159,34 @@ if __name__ == "__main__":
         f"rendering: Training: {args.render_train} | Eval: {args.render_eval}\n"
         f"{f"Training with {training_runs} runs.\n" if training_runs > 0 else ""}"
         f"{f"Evaluating with {eval_runs} runs.\n" if eval_runs > 0 and args.agent !="random" else ""}"
-        f"\nGame seed: {"Random" if args.game_seed is None else args.gameseed}\n"
+        f"\nGame seed: {"Random" if args.game_seed is None else args.game_seed}\n"
         f"Agent seed: {"Random" if args.agent_seed is None else args.agent_seed}"
         )
 
+    if args.game_seed is None:
+        game_seed = random.randrange(sys.maxsize)
+    else:
+        game_seed = args.game_seed
+
     if args.agent != "random":
         print(f"\n\nStarting {training_runs} training runs.\n")
-        time.sleep(1.0)
-        training_results = run_episodes(args.size, training_runs, args.render_train, args.verbose, agent, args.game_seed, train=True)
+
+        training_results = run_episodes(args.size, training_runs, args.render_train, args.verbose, agent, game_seed, train=True, progress_bar=True)
+        
+        if not Path("Output").is_dir():
+            Path.mkdir("Output")
+            
+        with open(f"Output/training_results_{training_runs}_{game_seed}_{args.agent}.csv", "w", newline="", encoding="utf-8") as file:
+            writer = csv.DictWriter(file, fieldnames=training_results[0].keys())
+            writer.writeheader()
+            writer.writerows (training_results)
+
+        agent.epsilon = 0.0
         
     print(f"\n\nStarting {eval_runs} evaluation runs.\n")
-    time.sleep(1.0)
-    eval_results = run_episodes(args.size, eval_runs, args.render_eval, args.verbose, agent, args.game_seed)
+
+    eval_results = run_episodes(args.size, eval_runs, args.render_eval, args.verbose, agent, game_seed)
+    with open(f"Output/evaluation_results_{training_runs}_{game_seed}_{args.agent}.csv", "w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=eval_results[0].keys())
+        writer.writeheader()
+        writer.writerows (eval_results)

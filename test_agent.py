@@ -4,7 +4,7 @@ from io import StringIO
 from unittest.mock import patch
 
 from agent import QLearningAgent, RandomAgent, run_episodes, compile_results, run_episode
-from snake import Action, SnakeGame
+from snake import Action, SnakeGame, StepResult
 
 
 STATE = (False, False, False, 0, True, False, False, True)
@@ -31,33 +31,48 @@ class QLearningAgentTest(unittest.TestCase):
         agent = QLearningAgent(epsilon=1.0, epsilon_decay=0.995)
         game = SnakeGame(render=False, seed=1)
 
-        run_episode(0, 1, game, agent, verbose=0)
+        run_episode(0, 1, game, agent, verbose=0, train=True)
 
         self.assertGreater(game.steps, 1)
+        self.assertEqual(agent.epsilon, 0.995)
+
+    def test_epsilon_decays_after_food_limit(self):
+        agent = QLearningAgent(seed=1)
+        game = SnakeGame(size=3, render=False, seed=1)
+        with patch.object(game, "step", return_value=StepResult(game.observation, 0, False)) as step:
+            with redirect_stdout(StringIO()):
+                truncated = run_episode(0, 1, game, agent, verbose=0, train=True)
+
+        self.assertTrue(truncated)
+        self.assertEqual(step.call_count, 2 * game.size * game.size)
         self.assertEqual(agent.epsilon, 0.995)
 
 
 class ResultsTest(unittest.TestCase):
     def test_compiles_episode_results(self):
         results = [
-            {"episode": 0, "score": 1, "steps": 10},
-            {"episode": 1, "score": 3, "steps": 8},
-            {"episode": 2, "score": 2, "steps": 10},
+            {"episode": 0, "score": 1, "steps": 10, "max_possible_score": 98},
+            {"episode": 1, "score": 3, "steps": 8, "max_possible_score": 98},
+            {"episode": 2, "score": 2, "steps": 10, "max_possible_score": 98},
         ]
 
         self.assertEqual(compile_results(results), {
             "average_score": 2,
+            "median_score": 2,
             "best_score": 3,
             "best_score_episode": 1,
             "average_survival": 28 / 3,
             "best_survival": 10,
             "best_survival_episode": 0,
+            "max_possible_score": 98,
         })
+        self.assertEqual(compile_results(results[:2])["median_score"], 2)
 
     def test_episode_results_require_verbose_level_one(self):
-        def finish_episode(_ep, _runs, game, _agent, _verbose):
+        def finish_episode(_ep, _runs, game, _agent, _verbose, _train):
             game.score = 2
             game.steps = 5
+            return True
 
         with patch("agent.run_episode", side_effect=finish_episode):
             quiet = StringIO()
@@ -68,7 +83,7 @@ class ResultsTest(unittest.TestCase):
                 run_episodes(size=3, runs=1, verbose=1, agent=RandomAgent(1), game_seed=1)
 
         self.assertNotIn("{'episode':", quiet.getvalue())
-        self.assertIn("{'episode': 0, 'score': 2, 'steps': 5}", logged.getvalue())
+        self.assertIn("{'episode': 0, 'grid_size': 3, 'max_possible_score': 7, 'score': 2, 'steps': 5, 'truncated': True}", logged.getvalue())
 
 
 if __name__ == "__main__":
