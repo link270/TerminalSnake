@@ -104,16 +104,7 @@ class DNQAgent(Agent):
         return list(Action)[best_index]
 
     def encode_state(self, state):
-        encoded_dir = [0,0,0,0]
-        match state[3]:
-            case 0:
-                encoded_dir = [1,0,0,0]
-            case 1:
-                encoded_dir = [0,1,0,0]
-            case 2:
-                encoded_dir = [0,0,1,0]
-            case 3:
-                encoded_dir = [0,0,0,1]
+        encoded_dir = [int(state[3] == direction) for direction in range(4)]
         
         return(
             int(state[0]),
