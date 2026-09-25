@@ -5,7 +5,7 @@ import sys
 import csv
 
 from pathlib import Path
-from agent_defs import RandomAgent, QLearningAgent, DNQAgent
+from agent_defs import RandomAgent, QLearningAgent, DQNAgent
 from snake import SnakeGame, Action
 
 
@@ -32,13 +32,12 @@ def run_episode(ep, runs, game, agent, verbose, train):
     steps_without_food = 0
     no_food_cap = 2 * game.size * game.size
     truncated = False
-    while not game.done:
+    done = game.done
+    while not done:
         state = game.get_state()
         action = agent.choose_action(state)
         observation, reward, done = game.step(action)
         next_state = None if done else game.get_state()
-
-        if train: agent.learn(state, action, reward, next_state, done)
         
         if verbose >= 2:
             log = f"Episode: {ep}/{runs}, Step: {game.steps}, Snake pos:{observation[0]}, Food pos: {observation[1]} Reward: {reward}, Done: {done}"
@@ -51,7 +50,9 @@ def run_episode(ep, runs, game, agent, verbose, train):
         if steps_without_food >= no_food_cap:
             print(f"\nRun: {ep} went {steps_without_food} without food. Ending early.")
             truncated = True
-            break
+            done = True
+
+        if train: agent.learn(state, action, reward, next_state, done)
 
     if train: agent.decay()
     return truncated
@@ -96,7 +97,8 @@ def run_episodes(size=10, runs=1000, render=False, verbose=0, agent = None, game
         
         if not isinstance(agent, RandomAgent):
             result["epsilon"] = agent.epsilon
-            result["num_q_table_states"] = len(agent.q_table)
+            if isinstance(agent, QLearningAgent):
+                result["num_q_table_states"] = len(agent.q_table)
         
         results.append(result)
         if not render and verbose >= 1:
@@ -138,7 +140,7 @@ if __name__ == "__main__":
     parser.add_argument("--render_eval", action="store_true")
     parser.add_argument("--render_train", action="store_true")
     parser.add_argument("--verbose", type=int, choices=(0, 1, 2), default=0)
-    parser.add_argument("--agent", choices=("random", "q_learning", "dnq"), default="q_learning")
+    parser.add_argument("--agent", choices=("random", "q_learning", "dqn"), default="q_learning")
     parser.add_argument("-tr", "--training_runs", type=int, default=10_000)
     parser.add_argument("-er", "--evaluation_runs", type=int, default=1_000)
     args = parser.parse_args()
@@ -148,8 +150,8 @@ if __name__ == "__main__":
             agent = RandomAgent(seed=args.agent_seed)
         case "q_learning":
             agent = QLearningAgent(seed=args.agent_seed)
-        case "dnq":
-            agent = DNQAgent(seed=args.agent_seed)
+        case "dqn":
+            agent = DQNAgent(seed=args.agent_seed)
     
     training_runs = args.training_runs
     eval_runs = args.evaluation_runs
@@ -175,7 +177,7 @@ if __name__ == "__main__":
         
         if not Path("Output").is_dir():
             Path.mkdir("Output")
-            
+    
         with open(f"Output/training_results_{training_runs}_{game_seed}_{args.agent}.csv", "w", newline="", encoding="utf-8") as file:
             writer = csv.DictWriter(file, fieldnames=training_results[0].keys())
             writer.writeheader()
