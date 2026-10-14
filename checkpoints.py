@@ -35,7 +35,8 @@ def save_checkpoint(directory, agent, game, episodes_completed):
         "agent": agent_kind(agent), "config": agent_config(agent),
         "agent_rng": agent.rng.getstate(),
         "episodes_completed": episodes_completed,
-        "environment": {"size": game.size, "seed": game.seed, "rng": game.random.getstate()},
+        "environment": {"size": game.size, "seed": game.seed, "rng": game.random.getstate(),
+                        "diagonal_obstacles": game.diagonal_obstacles},
         "boundary": "before_first_episode" if episodes_completed == 0 else "after_episode_and_epsilon_decay",
     }
     if isinstance(agent, DQNAgent):
@@ -63,7 +64,15 @@ def load_checkpoint(path):
         data = json.loads(path.read_text(encoding="utf-8"))
     if data["schema_version"] != VERSION:
         raise ValueError("Unsupported checkpoint schema version")
+    diagonal = data["environment"].get("diagonal_obstacles", False)
+    if not isinstance(diagonal, bool) or (diagonal and data["agent"] == "dqn"):
+        raise ValueError("Unsupported checkpoint observation mode")
+    if data["agent"] == "q_learning":
+        width = 12 if diagonal else 8
+        if any(len(row["state"]) != width for row in data["q_table"]):
+            raise ValueError("Q-table states do not match the checkpoint observation mode")
     agent = AGENTS[data["agent"]](**data["config"])
+    agent.diagonal_obstacles = diagonal
     agent.rng.setstate(tuple_tree(data["agent_rng"]))
     if isinstance(agent, QLearningAgent):
         agent.q_table = {tuple(row["state"]): row["values"] for row in data["q_table"]}

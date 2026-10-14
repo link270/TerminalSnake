@@ -121,8 +121,13 @@ Each line is a JSON object. Every record includes `run_id`, `phase`, `episode`,
 
 `(run_id, phase, episode, step)` identifies a transition. Episode IDs start at zero;
 transition steps start at one. Board coordinates are `[x, y]`, with the snake head
-first. Direction IDs are right/down/left/up = 0/1/2/3. The raw state has eight
-fields; their order is specified in `run.json`. DQN expands direction into four
+first. Direction IDs are right/down/left/up = 0/1/2/3. The default raw state has eight
+fields; their order is specified in `run.json`. With `--diagonal-obstacles`, Q-learning
+and random recordings append `obstacle_up_left`, `obstacle_up_right`,
+`obstacle_down_right`, `obstacle_down_left` (absolute board directions). These use
+the existing collision predicate, including the exclusion of the tail.
+`settings.diagonal_obstacles` identifies the mode; absent means the original mode.
+DQN expands direction into four
 one-hot features internally; encoded tensors/activations are not recorded yet.
 
 The final board is available even when `next_state` is null after termination.
@@ -146,6 +151,11 @@ the Q-table or DQN weights, agent RNG state, completed episode count, board size
 environment seed, and environment RNG state. DQN also stores its Adam optimizer
 and CPU PyTorch RNG state. Current DQN execution is CPU-only. No replay buffer or
 target network is added by this change.
+
+Checkpoints also save `environment.diagonal_obstacles`. Loading automatically
+restores this mode for evaluation and resuming. Explicit mode overrides must match;
+old checkpoints without this field use standard observations. Q-tables from the
+two modes are not interchangeable.
 
 Checkpoints are captured at episode boundaries, after learning and epsilon decay;
 the episode-zero checkpoint is captured before the first played episode. Resume

@@ -10,6 +10,10 @@ from typing import NamedTuple
 
 
 DIRECTIONS = ((1, 0), (0, 1), (-1, 0), (0, -1))
+STATE_FIELDS = ["danger_straight", "danger_right", "danger_left", "direction",
+                "food_up", "food_down", "food_left", "food_right"]
+DIAGONAL_FIELDS = ["obstacle_up_left", "obstacle_up_right", "obstacle_down_right", "obstacle_down_left"]
+DIAGONALS = ((-1, -1), (1, -1), (1, 1), (-1, 1))
 
 class Action(Enum):
     LEFT = -1
@@ -26,11 +30,12 @@ class StepResult(NamedTuple):
 class SnakeGame:
     """Small Snake environment. Actions are -1 (left), 0 (straight), 1 (right)."""
 
-    def __init__(self, size=10, render=True, seed=None):
+    def __init__(self, size=10, render=True, seed=None, diagonal_obstacles=False):
         if size < 3:
             raise ValueError("size must be at least 3")
         self.size = size
         self.render_enabled = render
+        self.diagonal_obstacles = diagonal_obstacles
 
         if seed is None:
             self.seed = random.randrange(sys.maxsize)
@@ -64,7 +69,7 @@ class SnakeGame:
         food_left = self.food is not None and self.food[0] < head_x
         food_right = self.food is not None and self.food[0] > head_x
 
-        return(
+        state = (
             # danger_straight, danger_right, danger_left,
             self.would_collide(Action.STRAIGHT),
             self.would_collide(Action.RIGHT),
@@ -79,6 +84,10 @@ class SnakeGame:
             food_left,
             food_right,
         )
+        if self.diagonal_obstacles:
+            # Reuse the existing wall/body check, including its tail exception.
+            state += tuple(self.is_collision((head_x + dx, head_y + dy)) for dx, dy in DIAGONALS)
+        return state
 
     def calculate_next_head(self, direction):
         dx, dy = DIRECTIONS[direction]

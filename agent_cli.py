@@ -16,6 +16,8 @@ def main(argv=None):
 
     parser = argparse.ArgumentParser(description="Train, evaluate and optionally record Snake agents.")
     parser.add_argument("--agent", choices=AGENTS, default=None)
+    parser.add_argument("--diagonal-obstacles", action=argparse.BooleanOptionalAction, default=None,
+                        help="Append four diagonal obstacle flags (Q-learning/random only); off for new agents")
     parser.add_argument("--size", type=int, default=None)
     parser.add_argument("--agent_seed", type=int)
     parser.add_argument("--game_seed", type=int)
@@ -44,8 +46,12 @@ def main(argv=None):
         parser.error("--resume-training requires --load-checkpoint")
 
     checkpoint = None
+    if args.agent == "dqn" and args.diagonal_obstacles:
+        parser.error("--diagonal-obstacles supports Q-learning and random agents only")
     if args.load_checkpoint:
         agent, checkpoint = load_checkpoint(args.load_checkpoint)
+        if args.diagonal_obstacles is not None and args.diagonal_obstacles != agent.diagonal_obstacles:
+            parser.error("Observation mode must match the checkpoint; omit the flag to use its saved mode")
         if args.agent is not None and args.agent != agent_kind(agent):
             parser.error("--agent does not match the checkpoint")
         if args.agent_seed is not None:
@@ -57,6 +63,7 @@ def main(argv=None):
             parser.error("Resuming training requires the saved --size and --game_seed")
     else:
         agent = AGENTS[args.agent or "q_learning"](seed=args.agent_seed)
+        agent.diagonal_obstacles = bool(args.diagonal_obstacles)
         size = 10 if args.size is None else args.size
         game_seed = random.randrange(sys.maxsize) if args.game_seed is None else args.game_seed
     training_runs = args.training_runs

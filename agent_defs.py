@@ -14,6 +14,7 @@ class Agent(ABC):
         self.rng = random.Random(self.seed)
 
         self.q_table = {}
+        self.diagonal_obstacles = False
         self.epsilon = 'N/A'
         self.epsilon_decay = 'N/A'
         self.minimum_epsilon = 'N/A'

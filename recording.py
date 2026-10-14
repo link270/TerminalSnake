@@ -10,11 +10,7 @@ import platform
 from uuid import uuid4
 
 from checkpoints import agent_config, agent_kind
-from snake import Action
-
-
-STATE_FIELDS = ["danger_straight", "danger_right", "danger_left", "direction",
-                "food_up", "food_down", "food_left", "food_right"]
+from snake import Action, STATE_FIELDS, DIAGONAL_FIELDS
 
 
 def snapshot(game):
@@ -47,10 +43,10 @@ class RunOutput:
             "schema_version": 1, "run_id": self.run_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "agent": agent_kind(agent), "agent_config": agent_config(agent),
-            "settings": settings,
+            "settings": {**settings, "diagonal_obstacles": agent.diagonal_obstacles},
             "recording": {"level": record, "episodes_per_phase": record_episodes,
                           "every": record_every, "dqn_internal_records": False},
-            "state_fields": STATE_FIELDS,
+            "state_fields": STATE_FIELDS + (DIAGONAL_FIELDS if agent.diagonal_obstacles else []),
             "directions": {"0": "right", "1": "down", "2": "left", "3": "up"},
             "actions": [{"name": action.name.lower(), "value": action.value} for action in Action],
             "coordinates": "x increases right, y increases down; snake positions are head first",

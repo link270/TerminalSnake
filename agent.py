@@ -100,9 +100,14 @@ def run_episodes(size=10, runs=1000, render=False, verbose=0, agent=None, game_s
         print("Skipping due to insufficient runs.")
         return []
 
-    game = SnakeGame(size=size, render=render, seed=game_seed)
+    if isinstance(agent, DQNAgent) and agent.diagonal_obstacles:
+        raise ValueError("Diagonal observations are supported only for Q-learning and random agents")
+    game = SnakeGame(size=size, render=render, seed=game_seed,
+                     diagonal_obstacles=agent.diagonal_obstacles)
     start_episode = 0
     if resume:
+        if agent.diagonal_obstacles != resume["environment"].get("diagonal_obstacles", False):
+            raise ValueError("Observation mode does not match the checkpoint")
         if not train or size != resume["environment"]["size"] or game_seed != resume["environment"]["seed"]:
             raise ValueError("Resuming requires training with the saved environment size and seed")
         game.random.setstate(tuple_tree(resume["environment"]["rng"]))
