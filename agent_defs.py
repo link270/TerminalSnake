@@ -4,10 +4,6 @@ import sys
 from abc import ABC, abstractmethod
 from snake import  Action
 
-import torch
-from torch import nn
-import torch.nn.functional as F
-
 class Agent(ABC):
     def __init__(self, seed=None):
         if seed is None:
@@ -25,11 +21,11 @@ class Agent(ABC):
         self.gamma = 'N/A'
 
     @abstractmethod
-    def choose_action(self, state) -> Action:
+    def choose_action(self, state, decision=None) -> Action:
         pass
 
     @abstractmethod
-    def learn(self, state, action, reward, next_state, done,):
+    def learn(self, state, action, reward, next_state, done, update=None):
         pass
 
     def decay(self):
@@ -37,10 +33,12 @@ class Agent(ABC):
 
 
 class RandomAgent(Agent):
-    def choose_action(self, state) -> Action:
+    def choose_action(self, state, decision=None) -> Action:
+        if decision is not None:
+            decision.update(method="random", action_probabilities=[1 / 3] * 3)
         return self.rng.choice(list(Action))
     
-    def learn(self, state, action, reward, next_state, done,):
+    def learn(self, state, action, reward, next_state, done, update=None):
         pass
 
 
@@ -55,11 +53,20 @@ class QLearningAgent(Agent):
         self.alpha = alpha
         self.gamma = gamma
 
-    def choose_action(self, state) -> Action:
-        if self.rng.random() < self.epsilon:
+    def choose_action(self, state, decision=None) -> Action:
+        explore = self.rng.random() < self.epsilon
+        # Looking at an unseen state must not change a frozen evaluation policy.
+        q_values = self.q_table.get(state, [0.0, 0.0, 0.0])
+        if decision is not None:
+            decision.update(
+                method="exploration" if explore else "greedy",
+                epsilon=self.epsilon, state_known=state in self.q_table,
+                q_values=list(q_values),
+                best_actions=[a.value for a, q in zip(Action, q_values) if q == max(q_values)],
+            )
+        if explore:
             return self.rng.choice(list(Action))
 
-        q_values = self.get_q_values(state)
         best_value = max(q_values)
         best_indices = [index for index, value in enumerate(q_values) if value == best_value]
         best_index = self.rng.choice(best_indices)
@@ -72,13 +79,21 @@ class QLearningAgent(Agent):
         return self.q_table[state]
 
     # new Q = old Q + α × (reward + γ × best future Q - old Q)
-    def learn(self, state, action, reward, next_state, done):
+    def learn(self, state, action, reward, next_state, done, update=None):
         action_index = list(Action).index(action)
         q_values = self.get_q_values(state)
         old_value = q_values[action_index]
         best_future_q = 0 if done else max(self.get_q_values(next_state))
 
         new_q = old_value + self.alpha * (reward + self.gamma * best_future_q - old_value)
+        if update is not None:
+            update.update(
+                old_q=old_value, new_q=new_q, alpha=self.alpha, gamma=self.gamma,
+                next_q_values=None if done else list(self.get_q_values(next_state)),
+                bootstrap_value=best_future_q, bootstrap_suppressed=done,
+                target=reward + self.gamma * best_future_q,
+                td_error=reward + self.gamma * best_future_q - old_value,
+            )
         q_values[action_index] = new_q
 
     def decay(self):
@@ -88,6 +103,10 @@ class QLearningAgent(Agent):
 class DQNAgent(Agent):
     def __init__(self, seed=None, epsilon=1.0, epsilon_decay = 0.995, minimum_epsilon = 0.05, gamma = 0.9, learning_rate=0.001,):
         super().__init__(seed)
+        import torch
+        from torch import nn
+
+        torch.manual_seed(self.seed)
 
         self.model = nn.Sequential(
             nn.Linear(11, 64),
@@ -105,7 +124,9 @@ class DQNAgent(Agent):
         self.gamma = gamma
         self.learning_rate = learning_rate
 
-    def choose_action(self, state) -> Action:
+    def choose_action(self, state, decision=None) -> Action:
+        import torch
+
         if self.rng.random() < self.epsilon:
             return self.rng.choice(list(Action))
 
@@ -140,7 +161,10 @@ class DQNAgent(Agent):
         )
 
     # new Q = old Q + α × (reward + γ × best future Q - old Q)
-    def learn(self, state, action, reward, next_state, done):
+    def learn(self, state, action, reward, next_state, done, update=None):
+        import torch
+        import torch.nn.functional as F
+
         action_index = list(Action).index(action)
 
         state_tensor = torch.tensor([self.encode_state(state)], dtype=torch.float32)

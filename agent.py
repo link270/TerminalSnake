@@ -1,12 +1,11 @@
-import argparse
-import random
+from contextlib import nullcontext
 from statistics import median
 import sys
-import csv
 
-from pathlib import Path
 from agent_defs import RandomAgent, QLearningAgent, DQNAgent
 from snake import SnakeGame, Action
+from checkpoints import save_checkpoint, tuple_tree
+from recording import snapshot
 
 
 def compile_results(results):
@@ -26,18 +25,35 @@ def compile_results(results):
     }
 
 
-def run_episode(ep, runs, game, agent, verbose, train):
+def run_episode(ep, runs, game, agent, verbose, train, trace=None):
     observation = game.reset()
     render_delay = 0.02
     steps_without_food = 0
     no_food_cap = 2 * game.size * game.size
     truncated = False
     done = game.done
+    total_reward = 0
+    reason = None
+    epsilon_used = None if isinstance(agent, RandomAgent) else agent.epsilon
+    if trace:
+        trace.write("episode_start", board=snapshot(game), state=game.get_state(), epsilon=epsilon_used)
     while not done:
         state = game.get_state()
-        action = agent.choose_action(state)
+        before = snapshot(game) if trace else None
+        decision = {} if trace and trace.detailed and not isinstance(agent, DQNAgent) else None
+        update = {} if decision is not None and train and isinstance(agent, QLearningAgent) else None
+        action = agent.choose_action(state, decision=decision)
+        attempted_head = game.calculate_next_head(game.calculate_next_direction(action)) if trace else None
         observation, reward, done = game.step(action)
         next_state = None if done else game.get_state()
+        total_reward += reward
+        reason = None
+        if done:
+            if reward == -1:
+                head = game.calculate_next_head(game.direction)
+                reason = "wall_collision" if game.is_wall(head) else "body_collision"
+            else:
+                reason = "board_complete"
         
         if verbose >= 2:
             log = f"Episode: {ep}/{runs}, Step: {game.steps}, Snake pos:{observation[0]}, Food pos: {observation[1]} Reward: {reward}, Done: {done}"
@@ -47,42 +63,73 @@ def run_episode(ep, runs, game, agent, verbose, train):
             game.render(render_delay)
 
         steps_without_food = 0 if reward == 1 else steps_without_food + 1
-        if steps_without_food >= no_food_cap:
+        if not done and steps_without_food >= no_food_cap:
             print(f"\nRun: {ep} went {steps_without_food} without food. Ending early.")
             truncated = True
             done = True
+            reason = "starvation_limit"
 
-        if train: agent.learn(state, action, reward, next_state, done)
+        if train:
+            agent.learn(state, action, reward, next_state, done, update=update)
+        if trace:
+            trace.write(
+                "transition", step=game.steps, before=before, after=snapshot(game),
+                state=state, next_state=next_state, action=action.value,
+                attempted_head=attempted_head, reward=reward, terminated=game.done,
+                truncated=truncated, done_for_learning=done, termination_reason=reason,
+                decision=decision, update=update,
+            )
 
     if train: agent.decay()
-    return truncated
+    outcome = {"truncated": truncated, "terminated": game.done, "termination_reason": reason,
+               "total_reward": total_reward, "epsilon_used": epsilon_used}
+    if trace:
+        trace.write("episode_end", **outcome, steps=game.steps, score=game.score,
+                    epsilon_after=None if isinstance(agent, RandomAgent) else agent.epsilon)
+    return outcome
 
 
-def run_episodes(size=10, runs=1000, render=False, verbose=0, agent = None, game_seed=None, train=False, progress_bar=False):
+def run_episodes(size=10, runs=1000, render=False, verbose=0, agent=None, game_seed=None,
+                 train=False, progress_bar=False, output=None, checkpoint_every=None,
+                 resume=None):
     if agent is None:
         print("Agent cannot be none.")
-        return
+        return []
 
     if runs <=0:
         print("Skipping due to insufficient runs.")
-        return
+        return []
 
     game = SnakeGame(size=size, render=render, seed=game_seed)
+    start_episode = 0
+    if resume:
+        if not train or size != resume["environment"]["size"] or game_seed != resume["environment"]["seed"]:
+            raise ValueError("Resuming requires training with the saved environment size and seed")
+        game.random.setstate(tuple_tree(resume["environment"]["rng"]))
+        start_episode = resume["episodes_completed"]
+    phase = "training" if train else "evaluation"
+    if checkpoint_every is not None and output is None:
+        raise ValueError("Checkpoint saving requires a run output directory")
+    if train and checkpoint_every is not None:
+        save_checkpoint(output.directory / "checkpoints", agent, game, start_episode)
 
     if progress_bar: progress_interval = max(1, runs // 100) 
     results = []
-    for ep in range(runs):
-        truncated = run_episode(ep, runs, game, agent, verbose, train)
+    for local_ep in range(runs):
+        ep = start_episode + local_ep
+        context = output.episode(phase, ep, local_ep) if output else nullcontext(None)
+        with context as trace:
+            outcome = run_episode(ep, start_episode + runs, game, agent, verbose, train, trace)
 
         if progress_bar:
-            if ep % progress_interval == 0 or ep == runs - 1:
-                percent = int((ep + 1) / runs * 100)
+            if local_ep % progress_interval == 0 or local_ep == runs - 1:
+                percent = int((local_ep + 1) / runs * 100)
                 bar_length = 40
                 filled_length = int(bar_length * percent // 100)
-                bar = '█' * filled_length + '-' * (bar_length - filled_length)
+                bar = '#' * filled_length + '-' * (bar_length - filled_length)
                 
                 # \r moves the cursor back to the start of the line
-                sys.stdout.write(f'\rProgress: |{bar}| {percent}% | Run: {ep+1}/{runs}')
+                sys.stdout.write(f'\rProgress: |{bar}| {percent}% | Run: {ep+1}/{start_episode + runs}')
                 sys.stdout.flush()
 
         
@@ -92,7 +139,7 @@ def run_episodes(size=10, runs=1000, render=False, verbose=0, agent = None, game
             "max_possible_score": size ** 2 - 2,
             "score": game.score,
             "steps": game.steps,
-            "truncated": truncated,
+            **outcome,
             }
         
         if not isinstance(agent, RandomAgent):
@@ -101,6 +148,9 @@ def run_episodes(size=10, runs=1000, render=False, verbose=0, agent = None, game
                 result["num_q_table_states"] = len(agent.q_table)
         
         results.append(result)
+        if train and checkpoint_every is not None:
+            if local_ep == runs - 1 or (checkpoint_every > 0 and (ep + 1) % checkpoint_every == 0):
+                save_checkpoint(output.directory / "checkpoints", agent, game, ep + 1)
         if not render and verbose >= 1:
             print(result)
 
@@ -133,62 +183,6 @@ def run_episodes(size=10, runs=1000, render=False, verbose=0, agent = None, game
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Start a game of snake with an agent.")
-    parser.add_argument("--size", type=int, default=10)
-    parser.add_argument("--agent_seed", type=int, default=None)
-    parser.add_argument("--game_seed", type=int, default=None)
-    parser.add_argument("--render_eval", action="store_true")
-    parser.add_argument("--render_train", action="store_true")
-    parser.add_argument("--verbose", type=int, choices=(0, 1, 2), default=0)
-    parser.add_argument("--agent", choices=("random", "q_learning", "dqn"), default="q_learning")
-    parser.add_argument("-tr", "--training_runs", type=int, default=10_000)
-    parser.add_argument("-er", "--evaluation_runs", type=int, default=1_000)
-    args = parser.parse_args()
+    from agent_cli import main
 
-    match args.agent:
-        case "random":
-            agent = RandomAgent(seed=args.agent_seed)
-        case "q_learning":
-            agent = QLearningAgent(seed=args.agent_seed)
-        case "dqn":
-            agent = DQNAgent(seed=args.agent_seed)
-    
-    training_runs = args.training_runs
-    eval_runs = args.evaluation_runs
-
-    print(
-        f"Starting with agent: {args.agent}, grid size: {args.size}, verbose level: {args.verbose}\n"
-        f"rendering: Training: {args.render_train} | Eval: {args.render_eval}\n"
-        f"{f"Training with {training_runs} runs.\n" if training_runs > 0 else ""}"
-        f"{f"Evaluating with {eval_runs} runs.\n" if eval_runs > 0 and args.agent !="random" else ""}"
-        f"\nGame seed: {"Random" if args.game_seed is None else args.game_seed}\n"
-        f"Agent seed: {"Random" if args.agent_seed is None else args.agent_seed}"
-        )
-
-    if args.game_seed is None:
-        game_seed = random.randrange(sys.maxsize)
-    else:
-        game_seed = args.game_seed
-
-    if args.agent != "random":
-        print(f"\n\nStarting {training_runs} training runs.\n")
-
-        training_results = run_episodes(args.size, training_runs, args.render_train, args.verbose, agent, game_seed, train=True, progress_bar=True)
-        
-        if not Path("Output").is_dir():
-            Path.mkdir("Output")
-    
-        with open(f"Output/training_results_{training_runs}_{game_seed}_{args.agent}.csv", "w", newline="", encoding="utf-8") as file:
-            writer = csv.DictWriter(file, fieldnames=training_results[0].keys())
-            writer.writeheader()
-            writer.writerows (training_results)
-
-        agent.epsilon = 0.0
-        
-    print(f"\n\nStarting {eval_runs} evaluation runs.\n")
-
-    eval_results = run_episodes(args.size, eval_runs, args.render_eval, args.verbose, agent, game_seed)
-    with open(f"Output/evaluation_results_{training_runs}_{game_seed}_{args.agent}.csv", "w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=eval_results[0].keys())
-        writer.writeheader()
-        writer.writerows (eval_results)
+    main()

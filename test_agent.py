@@ -12,11 +12,11 @@ NEXT_STATE = (False, True, False, 0, True, False, False, True)
 
 
 class QLearningAgentTest(unittest.TestCase):
-    def test_choose_action_creates_q_values_for_new_state(self):
+    def test_choose_action_does_not_mutate_unknown_state(self):
         agent = QLearningAgent(seed=1, epsilon=0)
 
         self.assertIsInstance(agent.choose_action(STATE), Action)
-        self.assertIn(STATE, agent.q_table)
+        self.assertNotIn(STATE, agent.q_table)
 
     def test_learn_updates_chosen_action_value(self):
         agent = QLearningAgent(alpha=0.5, gamma=0.9)
@@ -41,14 +41,20 @@ class QLearningAgentTest(unittest.TestCase):
         game = SnakeGame(size=3, render=False, seed=1)
         with patch.object(game, "step", return_value=StepResult(game.observation, 0, False)) as step:
             with redirect_stdout(StringIO()):
-                truncated = run_episode(0, 1, game, agent, verbose=0, train=True)
+                outcome = run_episode(0, 1, game, agent, verbose=0, train=True)
 
-        self.assertTrue(truncated)
+        self.assertTrue(outcome["truncated"])
         self.assertEqual(step.call_count, 2 * game.size * game.size)
         self.assertEqual(agent.epsilon, 0.995)
 
 
 class ResultsTest(unittest.TestCase):
+    def test_progress_supports_redirected_windows_output(self):
+        output = StringIO()
+        with redirect_stdout(output):
+            run_episodes(size=3, runs=1, agent=RandomAgent(1), game_seed=1, progress_bar=True)
+        output.getvalue().encode("cp1252")
+
     def test_compiles_episode_results(self):
         results = [
             {"episode": 0, "score": 1, "steps": 10, "max_possible_score": 98},
@@ -69,10 +75,10 @@ class ResultsTest(unittest.TestCase):
         self.assertEqual(compile_results(results[:2])["median_score"], 2)
 
     def test_episode_results_require_verbose_level_one(self):
-        def finish_episode(_ep, _runs, game, _agent, _verbose, _train):
+        def finish_episode(_ep, _runs, game, _agent, _verbose, _train, _trace):
             game.score = 2
             game.steps = 5
-            return True
+            return {"truncated": True}
 
         with patch("agent.run_episode", side_effect=finish_episode):
             quiet = StringIO()
