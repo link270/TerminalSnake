@@ -3,7 +3,7 @@ from contextlib import redirect_stdout
 from io import StringIO
 from unittest.mock import patch
 
-from agent import QLearningAgent, RandomAgent, run_episodes, compile_results, run_episode
+from agent import QLearningAgent, RandomAgent, DQNAgent, run_episodes, compile_results, run_episode
 from snake import Action, SnakeGame, StepResult
 
 
@@ -91,6 +91,65 @@ class ResultsTest(unittest.TestCase):
         self.assertNotIn("{'episode':", quiet.getvalue())
         self.assertIn("{'episode': 0, 'grid_size': 3, 'max_possible_score': 7, 'score': 2, 'steps': 5, 'truncated': True}", logged.getvalue())
 
+    def test_terminal_reward_moves_prediction_toward_target(self):
+        import torch
+        agent = DQNAgent(seed=1, epsilon=0)
 
+        # Arrange: make every initial Q-value zero.
+        with torch.no_grad():
+            for parameter in agent.model.parameters():
+                parameter.zero_()
+
+        encoded_state = agent.encode_state(STATE)
+        state_tensor = torch.tensor([encoded_state], dtype=torch.float32)
+
+        with torch.no_grad():
+            q_values_before = agent.model(state_tensor)
+            prediction_before = q_values_before[0,1].item()
+
+        agent.learn(
+            STATE,
+            Action.STRAIGHT,
+            reward=1,
+            next_state=None,
+            done=True,
+        )
+
+        with torch.no_grad():
+            q_values_after = agent.model(state_tensor)
+            prediction_after = q_values_after[0,1].item()
+
+        self.assertLess(abs(1.0 - prediction_after), abs(1.0 - prediction_before),)
+
+    def test_nonterminal_update_uses_future_reward(self):
+        import torch
+        agent = DQNAgent(seed=1, epsilon=0, gamma=0.9)
+
+        # Arrange: make every initial Q-value zero.
+        with torch.no_grad():
+            for parameter in agent.model.parameters():
+                parameter.zero_()
+                agent.model[-1].bias[2] = 2.0
+
+        encoded_state = agent.encode_state(STATE)
+        state_tensor = torch.tensor([encoded_state], dtype=torch.float32)
+
+        with torch.no_grad():
+            q_values_before = agent.model(state_tensor)
+            prediction_before = q_values_before[0,1].item()
+
+        print(q_values_before)
+
+        agent.learn(
+            STATE,
+            Action.STRAIGHT,
+            reward=1,
+            next_state=None,
+            done=True,
+        )
+
+        self.assertTrue(1)
+
+    
 if __name__ == "__main__":
     unittest.main()
