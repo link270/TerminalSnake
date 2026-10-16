@@ -1,9 +1,11 @@
 """Agent snapshots, including enough state to resume at the next episode."""
 
 import json
+from collections import deque
 from pathlib import Path
 
 from agent_defs import DQNAgent, QLearningAgent, RandomAgent
+from snake import Action
 
 
 AGENTS = {"random": RandomAgent, "q_learning": QLearningAgent, "dqn": DQNAgent}
@@ -18,7 +20,7 @@ def agent_config(agent):
     names = ["seed"]
     if not isinstance(agent, RandomAgent):
         names += ["epsilon", "epsilon_decay", "minimum_epsilon", "gamma"]
-        names += ["alpha"] if isinstance(agent, QLearningAgent) else ["learning_rate"]
+        names += ["alpha"] if isinstance(agent, QLearningAgent) else ["learning_rate", "batch_size"]
     return {name: getattr(agent, name) for name in names}
 
 
@@ -43,7 +45,11 @@ def save_checkpoint(directory, agent, game, episodes_completed):
         import torch
 
         data.update(model=agent.model.state_dict(), optimizer=agent.optimizer.state_dict(),
-                    torch_rng=torch.get_rng_state())
+                    torch_rng=torch.get_rng_state(),
+                    replay_memory={"capacity": agent.memory.maxlen, "transitions": [
+                        (state, action.value, reward, next_state, done)
+                        for state, action, reward, next_state, done in agent.memory
+                    ]})
         path = directory / f"episode_{episodes_completed:08d}.pt"
         torch.save(data, path)
     else:
@@ -82,4 +88,11 @@ def load_checkpoint(path):
         agent.model.load_state_dict(data["model"])
         agent.optimizer.load_state_dict(data["optimizer"])
         torch.set_rng_state(data["torch_rng"])
+        if "replay_memory" in data:
+            memory = data["replay_memory"]
+            agent.memory = deque((
+                (tuple(state), Action(action), reward,
+                 None if next_state is None else tuple(next_state), done)
+                for state, action, reward, next_state, done in memory["transitions"]
+            ), maxlen=memory["capacity"])
     return agent, data

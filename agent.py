@@ -106,6 +106,8 @@ def run_episodes(size=10, runs=1000, render=False, verbose=0, agent=None, game_s
                      diagonal_obstacles=agent.diagonal_obstacles)
     start_episode = 0
     if resume:
+        if isinstance(agent, DQNAgent) and "replay_memory" not in resume:
+            raise ValueError("This DQN checkpoint predates replay state; evaluation is supported, exact training resume is not")
         if agent.diagonal_obstacles != resume["environment"].get("diagonal_obstacles", False):
             raise ValueError("Observation mode does not match the checkpoint")
         if not train or size != resume["environment"]["size"] or game_seed != resume["environment"]["seed"]:
@@ -148,7 +150,8 @@ def run_episodes(size=10, runs=1000, render=False, verbose=0, agent=None, game_s
             }
         
         if not isinstance(agent, RandomAgent):
-            result["epsilon"] = agent.epsilon
+            result["epsilon"] = outcome["epsilon_used"]
+            result["epsilon_after"] = agent.epsilon
             if isinstance(agent, QLearningAgent):
                 result["num_q_table_states"] = len(agent.q_table)
         
@@ -187,7 +190,12 @@ def run_episodes(size=10, runs=1000, render=False, verbose=0, agent=None, game_s
     return results
 
 
-if __name__ == "__main__":
+def main(argv=None):
+    """Keep the original Python entry point while the CLI lives in agent_cli."""
     from agent_cli import main
 
+    return main(argv)
+
+
+if __name__ == "__main__":
     main()

@@ -18,6 +18,21 @@ The emphasis is on understanding:
 
 The project should remain small enough that every major part of the learning system can be understood and implemented directly.
 
+## Implementation checkpoint — October 16, 2026
+
+Phases 1–3 are implemented. Phase 4 now has CSV reporting, per-experiment settings
+and summaries, and reusable internal plotting via `plot_results.py` (external
+plotting was also explored). Phase 5 has an 11 → 64 → 64 → 3 network learning
+from single transitions, reproducible initialization, and focused verification.
+The other computer's recording, resumable checkpoints, and optional diagonal
+Q-table observations have been merged with local plotting. Replay storage,
+warm-up, and sampling are present, but the sampled batch is not used for updates yet.
+
+Next: finish minibatch predictions and targets, then add a target network.
+These correspond to mentoring Steps 5 and 6; they are still part of Phase 5 below.
+Richer observations and controlled experiments remain Phases 6 and 7. See the
+README for commands, output formats, and the current starvation-limit semantics.
+
 ---
 
 # Project Progression

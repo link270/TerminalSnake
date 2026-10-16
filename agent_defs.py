@@ -4,6 +4,8 @@ import sys
 from abc import ABC, abstractmethod
 from snake import  Action
 
+from collections import deque
+
 class Agent(ABC):
     def __init__(self, seed=None):
         if seed is None:
@@ -102,7 +104,7 @@ class QLearningAgent(Agent):
 
 
 class DQNAgent(Agent):
-    def __init__(self, seed=None, epsilon=1.0, epsilon_decay = 0.995, minimum_epsilon = 0.05, gamma = 0.9, learning_rate=0.001,):
+    def __init__(self, seed=None, epsilon=1.0, epsilon_decay = 0.995, minimum_epsilon = 0.05, gamma = 0.9, learning_rate=0.001, batch_size=64):
         super().__init__(seed)
         import torch
         from torch import nn
@@ -116,6 +118,9 @@ class DQNAgent(Agent):
             nn.ReLU(),
             nn.Linear(64, 3),
         )
+
+        self.batch_size = batch_size
+        self.memory = deque([], 10000)
         
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
 
@@ -165,6 +170,16 @@ class DQNAgent(Agent):
     def learn(self, state, action, reward, next_state, done, update=None):
         import torch
         import torch.nn.functional as F
+
+        self.memory.append((state, action, reward, next_state, done))
+
+        if len(self.memory) < self.batch_size:
+            return
+
+        batch = self.rng.sample(list(self.memory), self.batch_size)
+        states, actions, rewards, next_states, dones = zip(*batch)
+        # Learning exercise in progress: use this batch for predictions and targets next.
+        # The update below still uses the latest single transition.
 
         action_index = list(Action).index(action)
 

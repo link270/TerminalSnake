@@ -38,6 +38,7 @@ class RunOutput:
         self.record = record
         self.record_episodes = record_episodes
         self.record_every = record_every
+        self.summaries = {}
         source = Path(__file__).parent
         metadata = {
             "schema_version": 1, "run_id": self.run_id,
@@ -53,6 +54,8 @@ class RunOutput:
             "rewards": {"food": 1, "collision": -1, "move": 0},
             "starvation_limit": "2 * grid_size ** 2 steps without food",
             "bootstrap_on_truncation": False,
+            "epsilon_columns": {"epsilon": "used during episode", "epsilon_used": "used during episode",
+                                "epsilon_after": "after episode-end decay"},
             "episode_seeding": "one continuous environment RNG stream per phase, not per-episode reseeding",
             "python_version": platform.python_version(),
             "source_sha256": {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
@@ -63,6 +66,8 @@ class RunOutput:
 
             metadata["torch_version"] = str(torch.__version__)
             metadata["network"] = {"layers": [11, 64, 64, 3], "hidden_activation": "relu"}
+            metadata["replay_capacity"] = agent.memory.maxlen
+            metadata["learning_update"] = "single transition after replay warm-up; sampled batch not yet used"
         (self.directory / "run.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
     @contextmanager
@@ -85,3 +90,10 @@ class RunOutput:
             writer = csv.DictWriter(stream, fieldnames=results[0].keys())
             writer.writeheader()
             writer.writerows(results)
+        from agent import compile_results
+
+        self.summaries[phase] = compile_results(results) | {
+            "episodes": len(results),
+            "truncated_episodes": sum(result["truncated"] for result in results),
+        }
+        (self.directory / "summary.json").write_text(json.dumps(self.summaries, indent=2) + "\n", encoding="utf-8")

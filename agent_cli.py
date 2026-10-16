@@ -21,7 +21,7 @@ def main(argv=None):
     parser.add_argument("--size", type=int, default=None)
     parser.add_argument("--agent_seed", type=int)
     parser.add_argument("--game_seed", type=int)
-    parser.add_argument("--eval-seed", type=int, help="Evaluation environment seed; defaults to game_seed + 1")
+    parser.add_argument("--eval-seed", "--eval_game_seed", type=int, help="Evaluation environment seed; defaults to game_seed + 1")
     parser.add_argument("--eval-agent-seed", type=int, default=0, help="Evaluation action/tie-breaking seed")
     parser.add_argument("--render_eval", action="store_true")
     parser.add_argument("--render_train", action="store_true")
@@ -29,7 +29,11 @@ def main(argv=None):
     parser.add_argument("-tr", "--training_runs", type=int, default=None,
                         help="Additional training episodes; defaults to 10000, or 0 for load-only/random")
     parser.add_argument("-er", "--evaluation_runs", type=int, default=1000)
-    parser.add_argument("--output-dir", type=Path, help="New run directory; must not already exist")
+    output_options = parser.add_mutually_exclusive_group()
+    output_options.add_argument("--output-dir", type=Path, help="New run directory; must not already exist")
+    output_options.add_argument("--output_dir", dest="output_parent", type=Path,
+                                help="Parent directory for a new unique run folder (legacy local option)")
+    parser.add_argument("--plot", action="store_true", help="Save a results.png chart after the run")
     parser.add_argument("--record", choices=("none", "experience", "detailed"), default="none")
     parser.add_argument("--record-episodes", type=int, default=5,
                         help="Maximum recorded episodes per phase; 0 means all (default: 5)")
@@ -74,12 +78,19 @@ def main(argv=None):
     if size < 3 or training_runs < 0 or args.evaluation_runs < 0:
         parser.error("Size must be at least 3 and episode counts must be nonnegative")
     if training_runs + args.evaluation_runs == 0:
-        parser.error("Request at least one training or evaluation episode")
+        print("No episodes requested; no output written.")
+        return None
     save = args.save_checkpoints or args.checkpoint_every > 0
     if (save or args.resume_training) and training_runs == 0:
         parser.error("Saving/resuming training checkpoints requires training episodes")
     eval_seed = game_seed + 1 if args.eval_seed is None else args.eval_seed
-    directory = args.output_dir or Path("Output") / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    if training_runs and args.evaluation_runs and eval_seed == game_seed:
+        parser.error("Training and evaluation game seeds must differ")
+    if args.resume_training and agent_kind(agent) == "dqn" and "replay_memory" not in checkpoint:
+        parser.error("This DQN checkpoint predates replay state; evaluate it without --resume-training")
+    if args.plot:
+        from plot_results import plot_results
+    directory = args.output_dir or (args.output_parent or Path("Output")) / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
                                                      + "_" + agent_kind(agent) + "_" + uuid4().hex[:8])
     if directory.exists():
         parser.error("--output-dir must be a new directory to avoid overwriting a run")
@@ -113,6 +124,12 @@ def main(argv=None):
         finally:
             agent.epsilon = epsilon
             agent.rng.setstate(rng)
+    if args.plot:
+        plot_results(directory / "training.csv" if training_runs else None,
+                     directory / "evaluation.csv" if args.evaluation_runs else None,
+                     directory / "results.png",
+                     title=f"{agent_kind(agent)} | agent seed {agent.seed} | {size} x {size} board")
+    return directory
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ from unittest.mock import patch
 from agent import run_episode, run_episodes
 from agent_cli import main
 from agent_defs import DQNAgent, QLearningAgent, RandomAgent
-from checkpoints import load_checkpoint
+from checkpoints import load_checkpoint, save_checkpoint
 from recording import RunOutput
 from snake import Action, SnakeGame
 
@@ -99,9 +99,10 @@ class RecordingTest(unittest.TestCase):
 class CheckpointTest(unittest.TestCase):
     def check_resume(self, agent_type, episodes=12):
         with TemporaryDirectory() as temp:
-            continuous = agent_type(seed=3)
+            config = {"seed": 3, **({"batch_size": 2} if agent_type is DQNAgent else {})}
+            continuous = agent_type(**config)
             expected = quiet_run(agent=continuous, size=3, runs=episodes, game_seed=11, train=True)
-            split = agent_type(seed=3)
+            split = agent_type(**config)
             first = RunOutput(Path(temp) / "first", split, {}, "detailed")
             quiet_run(agent=split, size=3, runs=episodes // 2, game_seed=11, train=True,
                       output=first, checkpoint_every=0)
@@ -127,6 +128,15 @@ class CheckpointTest(unittest.TestCase):
 
                 for key, tensor in continuous.model.state_dict().items():
                     self.assertTrue(torch.equal(tensor, restored.model.state_dict()[key]), key)
+                self.assertEqual(restored.batch_size, 2)
+                self.assertEqual(restored.memory, continuous.memory)
+                self.assertEqual(restored.memory.maxlen, continuous.memory.maxlen)
+                expected_optimizer = continuous.optimizer.state_dict()["state"]
+                actual_optimizer = restored.optimizer.state_dict()["state"]
+                self.assertTrue(expected_optimizer, "The resume check must exercise real optimizer updates")
+                for parameter, values in expected_optimizer.items():
+                    for key, value in values.items():
+                        self.assertTrue(torch.equal(value, actual_optimizer[parameter][key]))
             # Episode-zero snapshots can also resume before the first game.
             self.assertTrue((first.directory / "checkpoints" / f"episode_00000000{extension}").exists())
 
@@ -138,6 +148,32 @@ class CheckpointTest(unittest.TestCase):
     @unittest.skipUnless(importlib.util.find_spec("torch"), "PyTorch is not installed")
     def test_dqn_resume_includes_optimizer(self):
         self.check_resume(DQNAgent, episodes=4)
+
+    @unittest.skipUnless(importlib.util.find_spec("torch"), "PyTorch is not installed")
+    def test_legacy_dqn_can_evaluate_but_cannot_claim_exact_resume(self):
+        import torch
+
+        with TemporaryDirectory() as temp, redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            root = Path(temp)
+            agent = DQNAgent(seed=3)
+            game = SnakeGame(size=3, seed=11, render=False)
+            path = save_checkpoint(root / "saved", agent, game, 0)
+            data = torch.load(path, weights_only=True)
+            del data["replay_memory"]
+            del data["config"]["batch_size"]
+            torch.save(data, path)
+
+            evaluated = main(["--load-checkpoint", str(path), "-er", "2", "--plot",
+                              "--record", "experience", "--output-dir", str(root / "evaluation")])
+            self.assertTrue((evaluated / "results.png").exists())
+            self.assertTrue((evaluated / "experience/evaluation/episode_00000000.jsonl").exists())
+            with self.assertRaises(SystemExit):
+                main(["--load-checkpoint", str(path), "--resume-training", "-tr", "2", "-er", "0",
+                      "--output-dir", str(root / "resume")])
+            self.assertFalse((root / "resume").exists())
+            restored, resume = load_checkpoint(path)
+            with self.assertRaisesRegex(ValueError, "predates replay state"):
+                quiet_run(agent=restored, size=3, runs=2, game_seed=11, train=True, resume=resume)
 
     def test_cli_train_load_evaluate_and_resume(self):
         with TemporaryDirectory() as temp, redirect_stdout(StringIO()):

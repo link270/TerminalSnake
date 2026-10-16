@@ -59,6 +59,8 @@ environment seed; incompatible overrides are rejected.
 | `--save-checkpoints` | Save initial and final training state |
 | `--checkpoint-every N` | Also save at multiples of N completed training episodes; implies checkpoint saving |
 | `--output-dir PATH` | Use a new explicit directory; existing directories are rejected |
+| `--output_dir PATH` | Legacy local option: create a unique run folder inside this parent |
+| `--plot` | Also save training/exploration and evaluation charts as `results.png` |
 
 Recordings stream to disk one transition at a time. Disabled or unselected episodes
 do not construct board snapshots or detailed decision/update dictionaries.
@@ -71,8 +73,10 @@ also use `-tr` for checkpointable episodes, although they do not learn.
 ```text
 Output/<UTC timestamp>_<agent>_<unique suffix>/
   run.json
+  summary.json
   training.csv
   evaluation.csv
+  results.png
   experience/
     training/episode_00000000.jsonl
     evaluation/episode_00000000.jsonl
@@ -95,7 +99,10 @@ For DQN it also records PyTorch version and layer sizes.
 CSVs retain episode, board size, score, steps, truncation, epsilon, Q-table size,
 and the training rolling average where applicable. New fields are total reward,
 true environment termination, ending reason, and `epsilon_used` for that episode.
-The existing `epsilon` field is measured after episode-end decay.
+`epsilon` now matches `epsilon_used` (before decay); `epsilon_after` retains the
+post-decay value. Older recording exports used `epsilon` for the post-decay value.
+The plotter prefers `epsilon_used` when available, falling back to `epsilon` for
+older local exports. `summary.json` provides aggregate results per phase.
 
 Endings distinguish wall collision, body collision, board completion, and the
 starvation cutoff. The current learner suppresses bootstrapping for both true
@@ -149,8 +156,15 @@ DQN gets common experience records only; its `decision` and `update` are null.
 One checkpoint supports both inference and resuming. It contains configuration,
 the Q-table or DQN weights, agent RNG state, completed episode count, board size,
 environment seed, and environment RNG state. DQN also stores its Adam optimizer
-and CPU PyTorch RNG state. Current DQN execution is CPU-only. No replay buffer or
-target network is added by this change.
+and CPU PyTorch RNG state. The merged version also stores replay transitions,
+capacity, and batch size; actions are saved as integers and restored as `Action`
+values. Current DQN execution is CPU-only. Storage/sampling exists, but using the
+sampled minibatch and adding a target network remain learning exercises.
+
+Older DQN checkpoints without replay state still load for evaluation. Exact
+training resume is rejected for them because the current warm-up/sampling behavior
+differs from the earlier learner. New DQN checkpoints resume with replay contents
+and sampling randomness restored. Q-learning/random checkpoint compatibility is unchanged.
 
 Checkpoints also save `environment.diagonal_obstacles`. Loading automatically
 restores this mode for evaluation and resuming. Explicit mode overrides must match;
